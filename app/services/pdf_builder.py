@@ -169,14 +169,14 @@ class PDFService:
                 resource_type="image", 
                 public_id=f"scripts/{unique_id_cloudinary}", 
                 format="pdf",
-                type="authenticated",
+                type="upload",
                 overwrite=True
             )
             
             pdf_url, options = cloudinary.utils.cloudinary_url(
                 f"scripts/{unique_id_cloudinary}",
                 resource_type="image",
-                type="authenticated",
+                type="upload",
                 format="pdf",
                 sign_url=True
             )
