@@ -9,3 +9,4 @@ requests
 pillow
 youtube-transcript-api
 httpx
+pypdf
