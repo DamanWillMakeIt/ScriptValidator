@@ -8,3 +8,4 @@ cloudinary
 requests
 pillow
 youtube-transcript-api
+httpx
