@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+python-multipart
+google-generativeai
+python-dotenv
+fpdf2
+cloudinary
+requests
+pillow
+youtube-transcript-api
