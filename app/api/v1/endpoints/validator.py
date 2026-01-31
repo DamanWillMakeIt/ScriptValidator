@@ -5,11 +5,11 @@ from app.services.editor import ScriptEditorService
 from app.services.pdf_builder import PDFService
 from app.services.researcher import ResearchService
 from app.services.pdf_reader import PDFReaderService
-from app.services.ai_parser import AIParserService  # <--- The Key Fix
+from app.services.ai_parser import AIParserService
 
 router = APIRouter()
 
-# Initialize all services
+# Initialize Services
 editor_service = ScriptEditorService()
 pdf_service = PDFService()
 research_service = ResearchService()
@@ -35,46 +35,48 @@ async def validate_script(payload: ScriptRequest):
         edits, score, critique = await editor_service.analyze_script(script_content, payload.tone)
         
         # --- 3. APPLY EDITS TO TEXT ---
-        # This gives us the "Final Polished Text" but it is flat (no table yet)
+        # The Fuzzy Logic in Editor Service will now find and replace the text
         final_script_flat = editor_service.apply_patches(script_content, edits)
         
-        # --- 4. RECONSTRUCT THE TABLE (The "As-It-Was" Fix) ---
+        # --- 4. RECONSTRUCT THE TABLE ---
         print("🏗️  [Validator] Reconstructing original table format...")
         scenes = parser_service.parse_messy_text_to_json(final_script_flat)
         
         # --- 5. GREEN HIGHLIGHT LOGIC ---
-        # We check which scenes contain the new "Edited" text
         print(f"🎨 [Validator] Highlighting {len(edits)} edits...")
-        
         for scene in scenes:
             scene['is_edited'] = False
-            # Flatten the scene text to search inside it
+            # Flatten scene text to search for edits
             row_text = (str(scene.get('visual_cue', '')) + " " + str(scene.get('audio_dialogue', ''))).lower()
             
             for edit in edits:
-                # If the AI's "Improved Snippet" is found in this row, turn it GREEN
+                # Normalize the improved snippet for matching
                 snippet = edit.improved_snippet.strip().lower()
+                # If we find the improved text in this row, Mark it Green!
                 if len(snippet) > 5 and snippet in row_text:
                     scene['is_edited'] = True
                     break
 
-        # --- 6. PRINT THE PDF (Using the Table Builder) ---
+        # --- 6. PRINT THE PDF ---
         print("📄 [Validator] Printing Final PDF...")
-        # Note: You MUST use the `create_table_report` function from the PDFService I gave you previously
+        # We pass score & critique so they appear at the top of the PDF
         pdf_url = pdf_service.create_table_report(
-            scenes=scenes, 
-            score=score,          # <--- PASSED HERE
-            critique=critique,    # <--- PASSED HERE
+            scenes=scenes,
+            score=score,
+            critique=critique,
             project_name=payload.topic or "Validated_Script"
         )
         
         print(f"✅ [Validator] Done! URL: {pdf_url}")
 
+        # --- 7. RETURN CLEAN RESPONSE ---
         return ScriptResponse(
             analysis=AnalysisResult(score=score, critique=critique),
             applied_edits=edits,
             competitors=[],
-            final_script=final_script_flat,
+            # IMPORTANT: We send empty string here so your JSON response isn't huge.
+            # The full script is already inside the PDF URL.
+            final_script="", 
             pdf_download_url=pdf_url
         )
 
