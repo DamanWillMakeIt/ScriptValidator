@@ -1,7 +1,6 @@
 from fpdf import FPDF
 import os
 import uuid
-import re
 import cloudinary
 import cloudinary.uploader
 import cloudinary.utils
@@ -16,176 +15,127 @@ class PDFService:
             secure = True
         )
 
-    def format_script_text(self, text: str) -> str:
-        """
-        Smartly reformats a wall of text into paragraphs.
-        """
-        # 1. Un-escape literal newlines if present
-        text = text.replace('\\n', '\n')
-        
-        # 2. If text already has paragraphs (more than 2 newlines), trust it.
-        if text.count('\n') > 2:
-            return text
+    def sanitize_text(self, text: str) -> str:
+        if not text: return ""
+        replacements = {'\u2018': "'", '\u2019': "'", '\u201c': '"', '\u201d': '"', '\u2013': '-'}
+        for char, r in replacements.items():
+            text = text.replace(char, r)
+        return text.encode('latin-1', 'replace').decode('latin-1')
 
-        # 3. If it's a "Wall of Text", split by sentences
-        # Split by . ! ? followed by a space
-        sentences = re.split(r'(?<=[.!?]) +', text)
-        
-        paragraphs = []
-        current_para = []
-        
-        # Group ~3 sentences per paragraph
-        for i, sentence in enumerate(sentences):
-            current_para.append(sentence)
-            if (i + 1) % 3 == 0:
-                paragraphs.append(" ".join(current_para))
-                current_para = []
-        
-        # Add leftovers
-        if current_para:
-            paragraphs.append(" ".join(current_para))
-            
-        return "\n\n".join(paragraphs)
-
-    def create_report(self, script: str, edits: list, score: int, critique: list) -> str:
+    def create_table_report(self, scenes: list, score: int, critique: list, project_name="Validated_Script") -> str:
         unique_id = uuid.uuid4().hex[:8]
-        filename = f"script_audit_{unique_id}.pdf"
-
+        filename = f"audit_{project_name}_{unique_id}.pdf"
+        
         pdf = FPDF()
+        pdf.set_auto_page_break(auto=True, margin=15)
         pdf.add_page()
         
-        # --- HEADER ---
+        # --- 1. HEADER & SCORECARD (RESTORED) ---
+        # Blue Header Bar
         pdf.set_fill_color(20, 30, 70) 
         pdf.rect(0, 0, 210, 30, 'F')
         pdf.set_y(10)
         pdf.set_font("Arial", 'B', 22)
         pdf.set_text_color(255, 255, 255)
-        pdf.cell(0, 10, "YouTube Script Audit", ln=True, align='C')
+        pdf.cell(0, 10, f"Script Audit: {project_name[:20]}", ln=True, align='C')
         pdf.ln(25) 
 
-        # --- SCORECARD ---
+        # Score & Critique Box
         start_y = pdf.get_y()
-        pdf.set_fill_color(245, 247, 250)
-        pdf.rect(10, start_y, 190, 75, 'F')
+        pdf.set_fill_color(245, 247, 250) # Light Gray background
+        pdf.rect(10, start_y, 190, 60, 'F')
         
         pdf.set_xy(15, start_y + 5)
         pdf.set_text_color(20, 30, 70)
         pdf.set_font("Arial", 'B', 26)
         pdf.cell(0, 15, f"Viral Score: {score}/100", ln=True)
         
+        # Critique Bullet Points
         pdf.set_text_color(50, 50, 50)
+        pdf.set_font("Arial", size=10)
         current_y = pdf.get_y()
         
-        for point in critique[:3]:
+        for point in critique[:4]: # Limit to 4 bullet points to fit box
             pdf.set_xy(15, current_y)
-            if ":" in point:
-                title, text = point.split(":", 1)
-                pdf.set_font("Arial", 'B', 11)
-                pdf.cell(0, 6, title + ":", ln=True)
-                pdf.set_x(18)
-                pdf.set_font("Arial", size=10)
-                pdf.multi_cell(175, 5, text.strip())
-                current_y = pdf.get_y() + 3
-            else:
-                pdf.set_font("Arial", size=10)
-                pdf.multi_cell(180, 5, point)
-                current_y = pdf.get_y() + 3
+            pdf.multi_cell(180, 5, self.sanitize_text(f"• {point}"))
+            current_y = pdf.get_y() + 2
 
-        pdf.set_y(start_y + 85)
-        
-        # --- IMPROVEMENTS ---
-        pdf.set_font("Arial", 'B', 14)
-        pdf.set_text_color(20, 30, 70)
-        pdf.cell(0, 10, "Suggested Improvements", ln=True)
-        pdf.set_draw_color(200, 200, 200)
-        pdf.line(10, pdf.get_y(), 200, pdf.get_y())
-        pdf.ln(5)
-        
-        if not edits:
-            pdf.set_font("Arial", size=11)
-            pdf.set_text_color(100, 100, 100)
-            pdf.cell(0, 10, "No major issues found. Great job!", ln=True)
+        # Move cursor below the scorecard to start the table
+        pdf.set_y(start_y + 70)
 
-        for i, edit in enumerate(edits):
-            pdf.set_font("Arial", 'B', 11)
+        # --- 2. TABLE HEADERS ---
+        pdf.set_font("Arial", 'B', 10)
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_fill_color(220, 220, 220)
+        
+        # Draw Headers
+        pdf.cell(15, 10, "Sc#", 1, 0, 'C', True)
+        pdf.cell(85, 10, "Visual Cue & AI Prompt", 1, 0, 'C', True)
+        pdf.cell(90, 10, "Audio / Dialogue", 1, 1, 'C', True)
+        
+        # --- 3. TABLE BODY (GREEN EDITS LOGIC) ---
+        pdf.set_font("Arial", '', 9)
+        
+        for scene in scenes:
+            s_id = str(scene.get('scene_number', '?'))
+            visual = self.sanitize_text(scene.get('visual_cue', ''))
+            audio = self.sanitize_text(scene.get('audio_dialogue', ''))
+            is_edited = scene.get('is_edited', False)
+
+            # Calculate Row Height
+            lines_visual = pdf.multi_cell(85, 5, visual, split_only=True)
+            lines_audio = pdf.multi_cell(90, 5, audio, split_only=True)
+            max_lines = max(len(lines_visual), len(lines_audio))
+            row_height = max_lines * 5 
+            
+            # Page Break Check
+            if pdf.get_y() + row_height > 270:
+                pdf.add_page()
+                # Re-draw headers on new page
+                pdf.set_font("Arial", 'B', 10)
+                pdf.set_fill_color(220, 220, 220)
+                pdf.cell(15, 10, "Sc#", 1, 0, 'C', True)
+                pdf.cell(85, 10, "Visual Cue & AI Prompt", 1, 0, 'C', True)
+                pdf.cell(90, 10, "Audio / Dialogue", 1, 1, 'C', True)
+                pdf.set_font("Arial", '', 9)
+
+            x_start = pdf.get_x()
+            y_start = pdf.get_y()
+            
+            # Col 1: ID
             pdf.set_text_color(0, 0, 0)
-            pdf.cell(0, 8, f"{i+1}. {edit.reason}", ln=True)
-            pdf.set_font("Courier", size=10) 
-            pdf.set_text_color(180, 0, 0)
-            pdf.multi_cell(0, 5, f"[-] {edit.original_snippet}")
-            pdf.set_text_color(0, 120, 0)
-            pdf.multi_cell(0, 5, f"[+] {edit.improved_snippet}")
-            pdf.ln(6) 
+            pdf.rect(x_start, y_start, 15, row_height)
+            pdf.multi_cell(15, row_height, s_id, border=0, align='C')
+            
+            # Col 2: Visuals (Check Green)
+            pdf.set_xy(x_start + 15, y_start)
+            if is_edited: pdf.set_text_color(0, 128, 0) # Green
+            else: pdf.set_text_color(0, 0, 0)
+            
+            pdf.rect(pdf.get_x(), y_start, 85, row_height)
+            pdf.multi_cell(85, 5, visual, border=0)
+            
+            # Col 3: Audio (Check Green)
+            pdf.set_xy(x_start + 100, y_start)
+            if is_edited: pdf.set_text_color(0, 128, 0)
+            else: pdf.set_text_color(0, 0, 0)
+            
+            pdf.rect(pdf.get_x(), y_start, 90, row_height)
+            pdf.multi_cell(90, 5, audio, border=0)
+            
+            # Reset for next row
+            pdf.set_xy(x_start, y_start + row_height)
+            pdf.set_text_color(0, 0, 0)
 
-        pdf.add_page() 
-
-        # --- FINAL SCRIPT DESIGN ---
-        pdf.set_fill_color(20, 30, 70)
-        pdf.rect(0, 0, 210, 20, 'F')
-        pdf.set_y(5)
-        pdf.set_font("Courier", 'B', 14) 
-        pdf.set_text_color(255, 255, 255)
-        pdf.cell(0, 10, "FINAL OPTIMIZED SCRIPT", ln=True, align='C')
-        pdf.ln(15)
-        
-        pdf.set_text_color(10, 10, 10)
-        pdf.set_font("Courier", size=11) 
-        
-        # --- SMART FORMATTING APPLIED HERE ---
-        formatted_script = self.format_script_text(script)
-        
-        # Split by DOUBLE newlines to get the paragraph blocks
-        paragraphs = formatted_script.split('\n\n')
-        
-        for para in paragraphs:
-            para = para.strip()
-            if not para: 
-                continue 
-            
-            # Sidebar Line
-            start_y = pdf.get_y()
-            pdf.set_draw_color(200, 200, 200)
-            pdf.set_line_width(0.5)
-            # Draw line relative to paragraph height
-            # We don't know exact height yet, so we draw a fixed marker
-            pdf.line(12, start_y, 12, start_y + 6) 
-            
-            pdf.set_x(15) 
-            pdf.multi_cell(0, 6, para)
-            
-            # Gap between sections
-            pdf.ln(6) 
-        
-        # --- UPLOAD ---
+        # --- 4. UPLOAD ---
         temp_path = f"temp_{filename}"
         pdf.output(temp_path)
         
         try:
-            print(f"☁️ Uploading {filename}...")
             unique_id_cloudinary = filename.split('.')[0]
-            
-            upload_result = cloudinary.uploader.upload(
-                temp_path, 
-                resource_type="image", 
-                public_id=f"scripts/{unique_id_cloudinary}", 
-                format="pdf",
-                type="upload",
-                overwrite=True
-            )
-            
-            pdf_url, options = cloudinary.utils.cloudinary_url(
-                f"scripts/{unique_id_cloudinary}",
-                resource_type="image",
-                type="upload",
-                format="pdf",
-                sign_url=True
-            )
-            
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-            
+            cloudinary.uploader.upload(temp_path, public_id=f"scripts/{unique_id_cloudinary}", resource_type="image", format="pdf", overwrite=True)
+            pdf_url, _ = cloudinary.utils.cloudinary_url(f"scripts/{unique_id_cloudinary}", resource_type="image", format="pdf")
+            if os.path.exists(temp_path): os.remove(temp_path)
             return pdf_url
-            
-        except Exception as e:
-            print(f"❌ Cloudinary Error: {e}")
-            return f"http://127.0.0.1:8000/static/{filename}"
+        except Exception:
+            return "error_generating_pdf"

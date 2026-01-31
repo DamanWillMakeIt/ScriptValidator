@@ -1,4 +1,5 @@
 import json
+import re
 import google.generativeai as genai
 from typing import List, Tuple
 from app.core.config import settings
@@ -6,71 +7,49 @@ from app.schemas.script import Edit
 
 class ScriptEditorService:
     def __init__(self):
-        # Using the smartest model available to you
-        self.model = genai.GenerativeModel('models/gemini-2.0-flash')
+        self.model = genai.GenerativeModel('gemini-2.0-flash')
         genai.configure(api_key=settings.GEMINI_API_KEY)
 
     async def analyze_script(self, script: str, tone: str) -> Tuple[List[Edit], int, List[str]]:
-        """
-        Performs a component-based audit to generate a REAL score.
-        """
-        print(f"\n--- 🧠 STARTING INTELLIGENT AUDIT FOR TONE: {tone.upper()} ---")
+        print(f"\n--- 🧠 STARTING RUTHLESS AUDIT FOR TONE: {tone.upper()} ---")
         
+        # PROMPT: We explicitly tell it to capture UNIQUE short phrases to make matching easier
         prompt = f"""
-        Act as an expert YouTube Algorithm Analyst.
-        Your job is to mathematically grade this script based on 3 pillars.
+        Act as a Ruthless YouTube Script Editor. 
         Target Tone: {tone}
 
-        --- SCORING FORMULA (Must equal 100) ---
-        1. HOOK (0-35 pts): Does the first 30s grab attention immediately? Or is there "hello welcome back" fluff?
-        2. RETENTION & PACING (0-35 pts): Are paragraphs short? Is there "slippery slope" writing?
-        3. VIRALITY & PAYOFF (0-30 pts): Is the value clear? Is the CTA strong?
-
-        Task:
-        1. Calculate the score for each pillar strictly.
-        2. Sum them for the Final Score.
-        3. Provide a critique that specifically references these 3 scores.
-        4. Find 3-5 actual weak sentences that hurt the score and rewrite them to fix the specific flaw.
+        INSTRUCTIONS:
+        1. Score the script (0-100) on Hooks, Retention, and Payoff.
+        2. If score < 100, you MUST provide at least 3 edits.
+        3. CRITICAL: When choosing "original_snippet", pick a unique 5-10 word phrase that exists EXACTLY in the text. Do not quote huge paragraphs.
 
         RETURN JSON ONLY:
         {{
-            "hook_score": 20,
-            "retention_score": 25,
-            "virality_score": 20,
-            "final_score": 65,
-            "critique": [
-                "Hook Score (20/35): Too slow. You wasted 10 seconds on intros.",
-                "Retention (25/35): Good, but paragraph 3 is a wall of text.",
-                "Virality (20/30): Strong ending, but needs a clearer ask."
-            ],
+            "final_score": 75,
+            "critique": ["Hook is weak", "Pacing is slow"],
             "edits": [
                 {{
-                    "original_snippet": "Hello guys welcome back to the channel today we talk about...",
-                    "improved_snippet": "This specific strategy doubled my income in 2 weeks. Here is how.",
-                    "reason": "Fixing Weak Hook: Removed fluff, started with immediate value."
+                    "original_snippet": "existing text here",
+                    "improved_snippet": "better text here",
+                    "reason": "Fixing weak hook"
                 }}
             ]
         }}
 
-        Script:
-        "{script[:20000]}"
+        SCRIPT:
+        "{script[:25000]}"
         """
         
         try:
             response = self.model.generate_content(prompt, generation_config={"response_mime_type": "application/json"})
             data = json.loads(response.text)
             
-            # 1. Get the Calculated Score
             final_score = data.get("final_score", 0)
-            
-            # 2. Get the Breakdown
             critique = data.get("critique", [])
-            
-            # 3. Get Edits
-            edits = [Edit(**item) for item in data.get("edits", [])]
+            edits = [Edit(**item) for item in data.get("edits", []) if item.get("original_snippet")]
             
             print(f"--- 🧠 AUDIT COMPLETE: {final_score}/100 ---")
-            print(f"--- Breakdown: {critique} ---")
+            print(f"--- Found {len(edits)} edits to apply ---")
             
             return edits, final_score, critique
             
@@ -78,23 +57,39 @@ class ScriptEditorService:
             print(f"❌ Analysis Error: {e}")
             return [], 0, ["Error: AI Analysis Failed"]
 
+    def normalize_text(self, text: str) -> str:
+        """Removes all whitespace/newlines to compare purely characters."""
+        return re.sub(r'\s+', '', text).lower()
+
     def apply_patches(self, original_script: str, edits: List[Edit]) -> str:
         """
-        Applies changes safely.
+        Smart Patching: Replaces text even if whitespace/newlines don't match perfectly.
         """
-        patched_script = original_script
+        final_script = original_script
+        
         for edit in edits:
-            # Normalize strings to avoid mismatch due to hidden spaces
-            clean_orig = edit.original_snippet.strip()
+            original_snippet = edit.original_snippet
+            improved_snippet = edit.improved_snippet
             
-            if clean_orig in patched_script:
-                patched_script = patched_script.replace(clean_orig, edit.improved_snippet, 1)
-            else:
-                # If exact match fails, try a looser match (removing newlines)
-                flat_orig = clean_orig.replace('\n', ' ')
-                flat_script = patched_script.replace('\n', ' ')
-                if flat_orig in flat_script:
-                     # This is a bit complex to patch perfectly without regex, 
-                     # but we return the unpatched version rather than breaking it.
-                     pass 
-        return patched_script
+            # 1. Try Exact Match (Fastest)
+            if original_snippet in final_script:
+                final_script = final_script.replace(original_snippet, improved_snippet, 1)
+                continue
+            
+            # 2. Try "Flexible Whitespace" Match (Regex)
+            # This turns "hello world" into "hello\s+world" to match newlines
+            escaped_snippet = re.escape(original_snippet)
+            # Replace escaped spaces with \s+ (match any space/newline)
+            flexible_pattern = escaped_snippet.replace(r'\ ', r'\s+')
+            
+            match = re.search(flexible_pattern, final_script, re.IGNORECASE)
+            if match:
+                print(f"✅ Fuzzy Match Found: replaced '{original_snippet[:20]}...'")
+                # We replace exactly what we found in the original text
+                final_script = final_script[:match.start()] + improved_snippet + final_script[match.end():]
+                continue
+
+            # 3. Fallback: If AI Hallucinated slightly, we skip to avoid breaking the script
+            print(f"⚠️ Failed to apply edit: '{original_snippet[:30]}...' (Text not found)")
+            
+        return final_script
