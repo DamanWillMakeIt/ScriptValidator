@@ -1,29 +1,38 @@
-from pydantic import BaseModel, HttpUrl
-from typing import List, Optional
+from pydantic import BaseModel
+from typing import List, Optional, Literal
 
-# INPUT: What the user sends us
-class ScriptRequest(BaseModel):
-    # FIXED: Made 'content' optional so you can just send 'script_url' if you want
-    content: Optional[str] = None 
-    script_url: Optional[str] = None
-    
-    tone: str = "engaging" 
+# ── INPUT ────────────────────────────────────────────────────────────────────
+
+class ArchitectScene(BaseModel):
+    scene_number: int
+    script_dialogue: str
+    veo_prompt: str
+    shoot_instructions: Optional[str] = ""
+    estimated_time_seconds: Optional[int] = 0
+    color_code: Optional[str] = "blue"
+
+class ScriptValidateRequest(BaseModel):
+    scenes: List[ArchitectScene]
+    tone: str = "professional"
     topic: str = "General"
-    fetch_competitors: bool = True
 
-# OUTPUT: What we send back
-class Edit(BaseModel):
-    original_snippet: str
-    improved_snippet: str
-    reason: str
+# ── OPERATIONS (returned to frontend as raw dicts) ───────────────────────────
+
+# ── OUTPUT ───────────────────────────────────────────────────────────────────
 
 class AnalysisResult(BaseModel):
     score: int
     critique: List[str]
 
-class ScriptResponse(BaseModel):
+class FinalScene(BaseModel):
+    scene_number: int
+    script_dialogue: str
+    veo_prompt: str
+    status: str  # "original" | "rewritten" | "added" | "merged" | "split"
+    operation_reason: Optional[str] = None
+
+class ScriptValidateResponse(BaseModel):
     analysis: AnalysisResult
-    applied_edits: List[Edit]
-    competitors: List[dict] = []
-    final_script: str
+    operations: List[dict]       # raw dicts so frontend can type-check freely
+    final_scenes: List[FinalScene]
     pdf_download_url: Optional[str] = None
