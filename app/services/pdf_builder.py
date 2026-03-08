@@ -51,10 +51,14 @@ class PDFService:
             return ""
         replacements = {
             "\u2018": "'", "\u2019": "'", "\u201c": '"', "\u201d": '"',
-            "\u2013": "-", "\u2014": "-", "\u2026": "...", "\u00b7": "*",
+            "\u2013": "-", "\u2014": "-", "\u2015": "-", "\u2026": "...",
+            "\u00b7": "*", "\u2022": "*", "\u00e2\u0080\u0094": "-",
+            "\u2012": "-", "\u2010": "-", "\u2011": "-",
+            "\u00a0": " ", "\u200b": "", "\ufeff": "",
         }
         for ch, r in replacements.items():
             text = text.replace(ch, r)
+        # Final safety net: drop anything still outside latin-1
         return text.encode("latin-1", "replace").decode("latin-1")
 
     def _draw_header_bar(self, pdf: FPDF, project_name: str):
