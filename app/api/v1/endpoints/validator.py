@@ -33,18 +33,21 @@ async def validate_script(payload: ScriptValidateRequest):
 
         print(f"🏗️  [Validator] Final scene count: {len(final_scenes)} (was {len(payload.scenes)})")
 
-        # 3. Build PDF
+        # 3. Build PDF (non-fatal)
         print("📄 [Validator] Building audit PDF...")
         analysis = AnalysisResult(score=score, critique=critique)
-        pdf_url = pdf_service.create_report(
-            final_scenes=final_scenes,
-            original_scenes=payload.scenes,
-            operations=operations,
-            analysis=analysis,
-            project_name=payload.topic or "Script_Audit"
-        )
-
-        print(f"✅ [Validator] Done. PDF: {pdf_url}")
+        pdf_url = None
+        try:
+            pdf_url = pdf_service.create_report(
+                final_scenes=final_scenes,
+                original_scenes=payload.scenes,
+                operations=operations,
+                analysis=analysis,
+                project_name=payload.topic or "Script_Audit"
+            )
+            print(f"✅ [Validator] Done. PDF: {pdf_url}")
+        except Exception as pdf_err:
+            print(f"⚠️ [Validator] PDF generation failed (non-fatal): {pdf_err}")
 
         return ScriptValidateResponse(
             analysis=analysis,
